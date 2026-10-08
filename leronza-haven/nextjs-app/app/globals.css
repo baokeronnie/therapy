@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root { --ease-calm: cubic-bezier(.22,.61,.36,1); }
+  html { background: #F4F8FB; color: #14283A; -webkit-text-size-adjust: 100%; }
+  body { font-family: var(--font-body), system-ui, sans-serif; line-height: 1.6; font-size: 1.0625rem; }
+  h1, h2, h3 { font-family: var(--font-display), Georgia, serif; line-height: 1.2; letter-spacing: -0.01em; }
+  :focus-visible { outline: 3px solid #0B5F96; outline-offset: 3px; border-radius: .5rem; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+}
+
+@layer components {
+  .card { @apply rounded-card border border-linen-edge bg-linen-card p-5 shadow-soft sm:p-6; }
+  .btn { @apply inline-flex min-h-[44px] items-center justify-center rounded-pill px-5 font-medium transition-colors duration-200 disabled:opacity-50; }
+  .btn-primary { @apply btn bg-sage-700 text-white hover:bg-sage-600; }
+  .btn-quiet { @apply btn border border-linen-edge bg-white text-ink hover:bg-sage-50; }
+}
