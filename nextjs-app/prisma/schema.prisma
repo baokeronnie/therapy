@@ -1,0 +1,134 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+enum Role { PATIENT COUNSELOR GUARDIAN }
+enum ApptStatus { BOOKED RESCHEDULED CANCELLED COMPLETED }
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  timeZone     String   @default("UTC")
+  phone        String?
+  createdAt    DateTime @default(now())
+
+  asPatient        CareLink[]     @relation("patient")
+  asCounselor      CareLink[]     @relation("counselor")
+  guardianOf       GuardianLink[] @relation("guardian")
+  guardians        GuardianLink[] @relation("ward")
+  messages         Message[]
+  checkIns         CheckIn[]
+  milestones       Milestone[]    @relation("milestoneOwner")
+  authored         Milestone[]    @relation("milestoneAuthor")
+  availability     AvailabilityBlock[]
+  apptsAsPatient   Appointment[]  @relation("apptPatient")
+  apptsAsCounselor Appointment[]  @relation("apptCounselor")
+  panicEvents      PanicEvent[]
+}
+
+// One counselor assigned to one patient. Owns the chat room.
+model CareLink {
+  id          String    @id @default(cuid())
+  patientId   String
+  counselorId String
+  soberSince  DateTime?
+  active      Boolean   @default(true)
+  patient     User      @relation("patient", fields: [patientId], references: [id])
+  counselor   User      @relation("counselor", fields: [counselorId], references: [id])
+  messages    Message[]
+  @@unique([patientId, counselorId])
+}
+
+model GuardianLink {
+  id         String  @id @default(cuid())
+  guardianId String
+  wardId     String
+  canSeeMood Boolean @default(false) // patient-controlled consent
+  guardian   User    @relation("guardian", fields: [guardianId], references: [id])
+  ward       User    @relation("ward", fields: [wardId], references: [id])
+  @@unique([guardianId, wardId])
+}
+
+model Message {
+  id         String    @id @default(cuid())
+  careLinkId String
+  senderId   String
+  body       String
+  createdAt  DateTime  @default(now())
+  editedAt   DateTime?
+  deletedAt  DateTime? // soft delete: UI renders "Message removed"
+  deletedBy  String?
+  channel    String    @default("APP")
+  careLink   CareLink  @relation(fields: [careLinkId], references: [id])
+  sender     User      @relation(fields: [senderId], references: [id])
+  @@index([careLinkId, createdAt])
+}
+
+model AvailabilityBlock {
+  id          String   @id @default(cuid())
+  counselorId String
+  startsAt    DateTime // UTC
+  endsAt      DateTime
+  counselor   User     @relation(fields: [counselorId], references: [id])
+  @@index([counselorId, startsAt])
+}
+
+model Appointment {
+  id           String     @id @default(cuid())
+  patientId    String
+  counselorId  String
+  startsAt     DateTime   // UTC
+  endsAt       DateTime
+  status       ApptStatus @default(BOOKED)
+  cancelReason String?
+  cancelledAt  DateTime?
+  createdAt    DateTime   @default(now())
+  patient      User       @relation("apptPatient", fields: [patientId], references: [id])
+  counselor    User       @relation("apptCounselor", fields: [counselorId], references: [id])
+  @@unique([counselorId, startsAt]) // blocks double booking
+}
+
+model CheckIn {
+  id        String   @id @default(cuid())
+  patientId String
+  date      DateTime @db.Date
+  mood      Int      // 1 to 5
+  craving   Int      // 0 to 10
+  sober     Boolean
+  note      String?
+  patient   User     @relation(fields: [patientId], references: [id])
+  @@unique([patientId, date])
+}
+
+model Milestone {
+  id         String   @id @default(cuid())
+  patientId  String
+  authorId   String?  // null = automatic streak badge
+  title      String
+  detail     String?
+  achievedAt DateTime @default(now())
+  patient    User     @relation("milestoneOwner", fields: [patientId], references: [id])
+  author     User?    @relation("milestoneAuthor", fields: [authorId], references: [id])
+}
+
+model PanicEvent {
+  id          String    @id @default(cuid())
+  patientId   String
+  createdAt   DateTime  @default(now())
+  notifiedIds String[]
+  resolvedAt  DateTime?
+  patient     User      @relation(fields: [patientId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  action    String   // MESSAGE_EDIT, MESSAGE_REMOVE, APPT_CANCEL ...
+  entity    String
+  entityId  String
+  meta      Json?
+  createdAt DateTime @default(now())
+  @@index([entity, entityId])
+}
