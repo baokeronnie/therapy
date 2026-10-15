@@ -1,25 +1,30 @@
 generator client { provider = "prisma-client-js" }
 datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
 
-enum Role { PATIENT COUNSELOR GUARDIAN }
+// Two roles only. ADMIN is the staff account (admin dashboard, client data, messaging, sessions).
+// The Guardian role and its login have been removed.
+enum Role { PATIENT ADMIN }
 enum ApptStatus { BOOKED RESCHEDULED CANCELLED COMPLETED }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  role         Role
-  timeZone     String   @default("UTC")
-  phone        String?
-  createdAt    DateTime @default(now())
+  id         String   @id @default(cuid())
+  authgearId String?  @unique          // Authgear user id ("sub"). Passwords live at Authgear, never in this database.
+  email      String   @unique
+  name       String
+  role       Role
+  timeZone   String   @default("UTC")
+  phone      String?                   // staff phone (used for SMS). Client phones are in ClientProfile, encrypted.
+  createdAt  DateTime @default(now())
 
+  profile          ClientProfile?
+  sessions         Session[]
   asPatient        CareLink[]     @relation("patient")
   asCounselor      CareLink[]     @relation("counselor")
-  guardianOf       GuardianLink[] @relation("guardian")
-  guardians        GuardianLink[] @relation("ward")
   messages         Message[]
   checkIns         CheckIn[]
+  triggers         TriggerLog[]
+  journal          JournalEntry[]
+  goals            Goal[]
   milestones       Milestone[]    @relation("milestoneOwner")
   authored         Milestone[]    @relation("milestoneAuthor")
   availability     AvailabilityBlock[]
@@ -28,27 +33,32 @@ model User {
   panicEvents      PanicEvent[]
 }
 
-// One counselor assigned to one patient. Owns the chat room.
+// Details collected at signup. Sensitive fields are AES-256-GCM encrypted by lib/crypto.ts (columns ending in Enc).
+model ClientProfile {
+  userId                String    @id
+  phoneEnc              String?
+  emergencyNameEnc      String?
+  emergencyPhoneEnc     String?
+  emergencyRelationEnc  String?
+  preferredContact      String    @default("APP")   // APP | SMS | EMAIL
+  soberSince            DateTime?
+  dailySpend            Float?                      // money normally spent per day, powers the "saved" counter
+  consentVersion        String
+  consentAt             DateTime
+  deletionRequestedAt   DateTime?
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// One assigned admin per client. Owns the chat room.
 model CareLink {
   id          String    @id @default(cuid())
   patientId   String
   counselorId String
-  soberSince  DateTime?
   active      Boolean   @default(true)
-  patient     User      @relation("patient", fields: [patientId], references: [id])
+  patient     User      @relation("patient", fields: [patientId], references: [id], onDelete: Cascade)
   counselor   User      @relation("counselor", fields: [counselorId], references: [id])
   messages    Message[]
   @@unique([patientId, counselorId])
-}
-
-model GuardianLink {
-  id         String  @id @default(cuid())
-  guardianId String
-  wardId     String
-  canSeeMood Boolean @default(false) // patient-controlled consent
-  guardian   User    @relation("guardian", fields: [guardianId], references: [id])
-  ward       User    @relation("ward", fields: [wardId], references: [id])
-  @@unique([guardianId, wardId])
 }
 
 model Message {
@@ -58,10 +68,10 @@ model Message {
   body       String
   createdAt  DateTime  @default(now())
   editedAt   DateTime?
-  deletedAt  DateTime? // soft delete: UI renders "Message removed"
+  deletedAt  DateTime?
   deletedBy  String?
   channel    String    @default("APP")
-  careLink   CareLink  @relation(fields: [careLinkId], references: [id])
+  careLink   CareLink  @relation(fields: [careLinkId], references: [id], onDelete: Cascade)
   sender     User      @relation(fields: [senderId], references: [id])
   @@index([careLinkId, createdAt])
 }
@@ -69,7 +79,7 @@ model Message {
 model AvailabilityBlock {
   id          String   @id @default(cuid())
   counselorId String
-  startsAt    DateTime // UTC
+  startsAt    DateTime
   endsAt      DateTime
   counselor   User     @relation(fields: [counselorId], references: [id])
   @@index([counselorId, startsAt])
@@ -79,15 +89,15 @@ model Appointment {
   id           String     @id @default(cuid())
   patientId    String
   counselorId  String
-  startsAt     DateTime   // UTC
+  startsAt     DateTime
   endsAt       DateTime
   status       ApptStatus @default(BOOKED)
   cancelReason String?
   cancelledAt  DateTime?
   createdAt    DateTime   @default(now())
-  patient      User       @relation("apptPatient", fields: [patientId], references: [id])
+  patient      User       @relation("apptPatient", fields: [patientId], references: [id], onDelete: Cascade)
   counselor    User       @relation("apptCounselor", fields: [counselorId], references: [id])
-  @@unique([counselorId, startsAt]) // blocks double booking
+  @@unique([counselorId, startsAt])
 }
 
 model CheckIn {
@@ -97,19 +107,63 @@ model CheckIn {
   mood      Int      // 1 to 5
   craving   Int      // 0 to 10
   sober     Boolean
+  sleepHours Float?
+  water     Int?     // glasses
+  exercise  Int?     // minutes
   note      String?
-  patient   User     @relation(fields: [patientId], references: [id])
+  patient   User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
   @@unique([patientId, date])
+}
+
+// "What set off the urge?" tracker.
+model TriggerLog {
+  id        String   @id @default(cuid())
+  patientId String
+  createdAt DateTime @default(now())
+  trigger   String   // STRESS | LONELINESS | BOREDOM | PEOPLE | PLACE | CONFLICT | CELEBRATION | OTHER
+  intensity Int      // 1 to 10
+  helpedEnc String?  // what helped (encrypted)
+  patient   User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  @@index([patientId, createdAt])
+}
+
+// Private by default. Admin only sees entries the client chose to share.
+model JournalEntry {
+  id        String   @id @default(cuid())
+  patientId String
+  createdAt DateTime @default(now())
+  prompt    String?
+  bodyEnc   String
+  shared    Boolean  @default(false)
+  patient   User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  @@index([patientId, createdAt])
+}
+
+model Goal {
+  id        String    @id @default(cuid())
+  patientId String
+  title     String
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  patient   User      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  logs      GoalLog[]
+}
+model GoalLog {
+  id     String   @id @default(cuid())
+  goalId String
+  date   DateTime @db.Date
+  goal   Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  @@unique([goalId, date])
 }
 
 model Milestone {
   id         String   @id @default(cuid())
   patientId  String
-  authorId   String?  // null = automatic streak badge
+  authorId   String?
   title      String
   detail     String?
   achievedAt DateTime @default(now())
-  patient    User     @relation("milestoneOwner", fields: [patientId], references: [id])
+  patient    User     @relation("milestoneOwner", fields: [patientId], references: [id], onDelete: Cascade)
   author     User?    @relation("milestoneAuthor", fields: [authorId], references: [id])
 }
 
@@ -119,16 +173,31 @@ model PanicEvent {
   createdAt   DateTime  @default(now())
   notifiedIds String[]
   resolvedAt  DateTime?
-  patient     User      @relation(fields: [patientId], references: [id])
+  patient     User      @relation(fields: [patientId], references: [id], onDelete: Cascade)
 }
 
+// Who looked at or exported what. Never deleted with a client.
 model AuditLog {
   id        String   @id @default(cuid())
   actorId   String
-  action    String   // MESSAGE_EDIT, MESSAGE_REMOVE, APPT_CANCEL ...
+  action    String   // CLIENT_VIEW, CLIENT_EXPORT, MESSAGE_EDIT, APPT_CANCEL, CLIENT_DELETE ...
   entity    String
   entityId  String
   meta      Json?
   createdAt DateTime @default(now())
   @@index([entity, entityId])
+}
+
+// One row per signed-in browser/device. Every account has its own sessions; revoking a row signs that device out.
+model Session {
+  id         String    @id @default(cuid())
+  userId     String
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  userAgent  String?
+  idTokenEnc String?   // Authgear ID token (encrypted), used to end the Authgear session on sign-out
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
 }

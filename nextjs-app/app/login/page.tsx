@@ -1,34 +1,29 @@
-"use client";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-const dest: Record<string, string> = { PATIENT: "/patient", COUNSELOR: "/counselor", GUARDIAN: "/guardian" };
-export default function Login() {
-  const r = useRouter();
-  const [reg, setReg] = useState(false), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setBusy(true); setErr("");
-    const f = Object.fromEntries(new FormData(e.currentTarget).entries());
-    const res = await fetch(reg ? "/api/auth/register" : "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
-    setBusy(false);
-    if (!res.ok) return setErr((await res.json().catch(() => ({}))).error || "Something went wrong. Please try again.");
-    r.push(dest[(await res.json()).role]); r.refresh();
-  }
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getSession, home } from "@/lib/auth";
+export const dynamic = "force-dynamic";
+const ERR: Record<string, string> = {
+  denied: "Sign-in was cancelled. You can try again whenever you are ready.",
+  state: "That sign-in link expired. Please start again.",
+  verify_email: "An account with this email exists but the email has not been verified yet. Verify it in the sign-in screen, then try again.",
+  no_email: "Your sign-in did not include an email address, so we could not set up your account.",
+  conflict: "This email is already linked to a different sign-in. Contact your administrator.",
+  config: "Sign-in is not configured correctly yet. Please contact the administrator.",
+  failed: "We could not sign you in. Please try again.",
+};
+export default async function Login({ searchParams }: { searchParams: { error?: string } }) {
+  const s = await getSession(); if (s) redirect(home(s.role));
+  const err = searchParams.error ? ERR[searchParams.error] ?? ERR.failed : "";
   return (
     <main id="main" className="card mx-auto my-10 max-w-md">
-      <h1 className="text-3xl">{reg ? "Create your account" : "Welcome back"}</h1>
-      <p className="mt-2">A private recovery companion from Leronza &amp; Co. Track your sober days and daily mood, message or text your counselor, book sessions, and alert someone you trust the moment you need urgent help.</p>
-      <form onSubmit={submit} className="mt-5 grid gap-4">
-        {reg && <label>Full name<input name="name" required className="mt-1 min-h-[44px] w-full rounded-xl border border-linen-edge px-3" /></label>}
-        <label>Email<input name="email" type="email" required className="mt-1 min-h-[44px] w-full rounded-xl border border-linen-edge px-3" /></label>
-        <label>Password<input name="password" type="password" required minLength={8} className="mt-1 min-h-[44px] w-full rounded-xl border border-linen-edge px-3" /></label>
-        {reg && <label>I am joining as
-          <select name="role" className="mt-1 min-h-[44px] w-full rounded-xl border border-linen-edge px-3">
-            <option value="PATIENT">A patient seeking support</option><option value="COUNSELOR">A counselor</option><option value="GUARDIAN">A guardian for someone in recovery</option>
-          </select></label>}
-        <p role="alert" className="text-sm text-coral-700">{err}</p>
-        <button className="btn-primary" disabled={busy}>{reg ? "Create account" : "Sign in"}</button>
-      </form>
-      <button className="btn-quiet mt-3 w-full" onClick={() => { setReg(!reg); setErr(""); }}>{reg ? "Back to sign in" : "Create an account"}</button>
+      <h1 className="text-3xl">Welcome</h1>
+      <p className="mt-2">A private recovery companion from Leronza &amp; Co. Track your progress, build healthy habits, message your counselor, book sessions, and ask for urgent help the moment you need it.</p>
+      {err && <p role="alert" className="mt-4 rounded-2xl bg-coral-50 p-3 text-coral-700">{err}</p>}
+      <div className="mt-6 grid gap-3">
+        <a href="/api/auth/login" className="btn-primary">Sign in or create an account</a>
+      </div>
+      <p className="mt-3 text-center text-sm text-ink-soft">New here? Choose &ldquo;Sign up&rdquo; on the next screen. Administrators sign in the same way with their email and password.</p>
+      <p className="mt-4 text-center text-sm text-ink-soft">Your information is encrypted and seen only by you and your Leronza &amp; Co care team. <Link href="/privacy" className="underline">Privacy notice</Link></p>
     </main>
   );
 }

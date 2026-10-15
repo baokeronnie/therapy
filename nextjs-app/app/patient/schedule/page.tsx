@@ -4,7 +4,7 @@ import { getSession } from "@/lib/auth";
 import { SchedulingInterface } from "@/components/scheduling/SchedulingInterface";
 export const dynamic = "force-dynamic";
 export default async function Page() {
-  const s = await getSession(); if (!s) redirect("/login");
+  const s = await getSession(); if (!s || s.role !== "PATIENT") redirect("/login");
   const link = await prisma.careLink.findFirst({ where: { patientId: s.id, active: true }, include: { counselor: true } });
   if (!link) return <main id="main" className="card mx-auto my-8 max-w-xl">You have no counselor assigned yet. Once one is assigned you can book sessions here.</main>;
   const booked = await prisma.appointment.findMany({ where: { counselorId: link.counselorId, status: { in: ["BOOKED", "RESCHEDULED"] } }, select: { startsAt: true } });

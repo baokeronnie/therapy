@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 
 const HOLD_MS = 2000;
 
-/** Hold 2 seconds (pointer, touch, or Space/Enter) to alert the Guardian. */
+/** Hold 2 seconds (pointer, touch, or Space/Enter) to alert the care team. */
 export function PanicButton({ className = "" }: { className?: string }) {
   const [progress, setProgress] = useState(0);
   const [state, setState] = useState<"idle" | "holding" | "sent" | "error">("idle");
@@ -39,7 +39,7 @@ export function PanicButton({ className = "" }: { className?: string }) {
   };
 
   const label =
-    state === "sent" ? "Your guardian has been alerted" :
+    state === "sent" ? "Your care team has been alerted" :
     state === "error" ? "Could not send. Call your local emergency line." :
     state === "holding" ? "Keep holding" : "Hold for 2 seconds to get help";
 
